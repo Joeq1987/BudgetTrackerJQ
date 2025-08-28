@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Budget Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .transaction.income { border-right: 5px solid #22c55e; }
+    .transaction.expense { border-right: 5px solid #ef4444; }
+    #transaction-list::-webkit-scrollbar { width: 8px; }
+    #transaction-list::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 10px; }
+    #transaction-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    #transaction-list::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    canvas { width: 100%; height: 260px; max-height: 260px; }
+    .btn { @apply font-semibold py-2 px-3 rounded-lg transition; }
+  </style>
+</head>
+<body class="bg-slate-100 min-h-screen p-4">
+
+  <!-- Loading -->
+  <div id="loading-spinner" class="fixed inset-0 bg-slate-100 bg-opacity-75 flex items-center justify-center z-50">
+    <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-500"></div>
+  </div>
+
+  <div id="app-container" class="max-w-5xl mx-auto hidden">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- Left -->
+      <div class="lg:col-span-1 space-y-6">
+        <header>
+          <h1 class="text-3xl font-bold text-slate-800">Budget Tracker</h1>
+          <p class="text-slate-500">Non-destructive zeroing, clean visuals.</p>
+        </header>
+
+        <!-- Balance + Controls -->
+        <div class="bg-white p-6 rounded-2xl shadow-md space-y-4">
+          <div>
+            <h2 class="text-sm font-medium text-slate-500 uppercase">Displayed Balance</h2>
+            <p id="balance" class="text-4xl font-bold text-slate-800 mt-1">£0.00</p>
+            <p id="baseline-note" class="text-xs text-slate-500 mt-1 hidden"></p>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <button id="toggle-graphs" class="btn bg-slate-800 hover:bg-slate-900 text-white">Show Graphs</button>
+            <button id="zero-now" class="btn bg-blue-600 hover:bg-blue-700 text-white" title="Start counting from zero without deleting history">Zero Now</button>
+            <button id="undo-zero" class="btn bg-amber-600 hover:bg-amber-700 text-white" title="Remove baseline offset and show true totals">Undo Zero</button>
+            <button id="hard-reset" class="btn bg-red-600 hover:bg-red-700 text-white" title="Delete all transactions (destructive)">Hard Reset</button>
+          </div>
+          <p class="text-xs text-slate-500">
+            Zero Now applies a baseline offset, preserving history. Hard Reset deletes records.
+          </p>
+        </div>
+
+        <!-- Add Transaction -->
+        <div class="bg-white p-6 rounded-2xl shadow-md">
+          <h3 class="text-xl font-bold text-slate-800 border-b pb-3 mb-4">Add new transaction</h3>
+          <form id="form">
+            <div class="space-y-4">
+              <div>
+                <label for="text" class="block text-sm font-medium text-slate-700">Description</label>
+                <input id="text" type="text" placeholder="Enter description..." class="mt-1 block w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm shadow-sm placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" required>
+              </div>
+              <div>
+                <label for="amount" class="block text-sm font-medium text-slate-700">Amount</label>
+                <input id="amount" type="number" step="0.01" placeholder="Enter amount..." class="mt-1 block w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm shadow-sm placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" required>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-slate-700">Transaction Type</label>
+                <div class="mt-2 flex gap-4">
+                  <label class="flex items-center">
+                    <input type="radio" name="type" value="income" class="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500" checked>
+                    <span class="ml-2 text-sm text-slate-700">Income</span>
+                  </label>
+                  <label class="flex items-center">
+                    <input type="radio" name="type" value="expense" class="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                    <span class="ml-2 text-sm text-slate-700">Expense</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+            <button class="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition">Add Transaction</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Right -->
+      <div class="lg:col-span-2 space-y-6">
+        <div class="bg-white p-6 rounded-2xl shadow-md flex divide-x divide-slate-200">
+          <div class="flex-1 pr-6 text-center">
+            <h4 class="text-sm font-medium text-slate-500 uppercase">Income</h4>
+            <p id="money-plus" class="text-2xl font-semibold text-green-500 mt-1">+£0.00</p>
+          </div>
+          <div class="flex-1 pl-6 text-center">
+            <h4 class="text-sm font-medium text-slate-500 uppercase">Expense</h4>
+            <p id="money-minus" class="text-2xl font-semibold text-red-500 mt-1">-£0.00</p>
+          </div>
+        </div>
+
+        <!-- Graphs -->
+        <div id="graphs-card" class="bg-white p-6 rounded-2xl shadow-md hidden">
+          <h3 class="text-xl font-bold text-slate-800 border-b pb-3 mb-4">Visuals</h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="space-y-2">
+              <h4 class="text-sm font-semibold text-slate-700">Balance Over Time (with baseline)</h4>
+              <canvas id="balanceChart" width="600" height="260"></canvas>
+            </div>
+            <div class="space-y-2">
+              <h4 class="text-sm font-semibold text-slate-700">Income vs Expense (since baseline)</h4>
+              <canvas id="pieChart" width="600" height="260"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- History -->
+        <div class="bg-white p-6 rounded-2xl shadow-md">
+          <h3 class="text-xl font-bold text-slate-800 border-b pb-3 mb-4">History</h3>
+          <ul id="transaction-list" class="space-y-3 max-h-[420px] overflow-y-auto pr-2"></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    /* ---------- Firebase SDK ---------- */
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import {
+      getFirestore, collection, doc, addDoc, deleteDoc, onSnapshot,
+      setLogLevel, getDocs, setDoc, getDoc
+    } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    /* ---------- DOM ---------- */
+    const balance = document.getElementById('balance');
+    const money_plus = document.getElementById('money-plus');
+    const money_minus = document.getElementById('money-minus');
+    const list = document.getElementById('transaction-list');
+    const form = document.getElementById('form');
+    const textInput = document.getElementById('text');
+    const amountInput = document.getElementById('amount');
+    const loadingSpinner = document.getElementById('loading-spinner');
+    const appContainer = document.getElementById('app-container');
+    const graphsCard = document.getElementById('graphs-card');
+    const toggleGraphsBtn = document.getElementById('toggle-graphs');
+    const zeroBtn = document.getElementById('zero-now');
+    const undoZeroBtn = document.getElementById('undo-zero');
+    const hardResetBtn = document.getElementById('hard-reset');
+    const baselineNote = document.getElementById('baseline-note');
+    const balanceCanvas = document.getElementById('balanceChart');
+    const pieCanvas = document.getElementById('pieChart');
+
+    /* ---------- Config ---------- */
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+    const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+    let db, auth, userId;
+    let transactionsCol;
+    let settingsDoc; // for baseline offset
+    let transactions = [];
+    let baselineOffset = 0;           // number (can be negative)
+    let baselineTimestamp = null;     // Date when zero set (used for charts/labels)
+
+    /* ---------- Helpers ---------- */
+    const toJsDate = v => {
+      try {
+        if (!v) return new Date();
+        if (typeof v?.toDate === 'function') return v.toDate();
+        if (typeof v === 'string' || typeof v === 'number') return new Date(v);
+        return new Date();
+      } catch { return new Date(); }
+    };
+
+    function showApp(){ loadingSpinner.style.display='none'; appContainer.style.display='block'; }
+    function saveBaselineLocal() {
+      localStorage.setItem('baselineOffset', String(baselineOffset));
+      localStorage.setItem('baselineTimestamp', baselineTimestamp ? String(baselineTimestamp.getTime()) : '');
+    }
+    function loadBaselineLocal() {
+      const o = Number(localStorage.getItem('baselineOffset') || 0);
+      baselineOffset = Number.isFinite(o) ? o : 0;
+      const ts = localStorage.getItem('baselineTimestamp');
+      baselineTimestamp = ts ? new Date(Number(ts)) : null;
+    }
+    function updateBaselineNote() {
+      if (!baselineOffset) {
+        baselineNote.classList.add('hidden');
+        baselineNote.textContent = '';
+      } else {
+        const when = baselineTimestamp ? new Date(baselineTimestamp).toLocaleString() : 'now';
+        baselineNote.classList.remove('hidden');
+        baselineNote.textContent = `Baseline offset active: £${baselineOffset.toFixed(2)} (set ${when}). Displayed totals start from zero.`;
+      }
+    }
+
+    /* ---------- Init ---------- */
+    async function initializeAppAndAuth() {
+      try {
+        if (Object.keys(firebaseConfig).length === 0) {
+          console.warn('Firebase config missing, running in local-only mode.');
+          loadBaselineLocal();
+          showApp();
+          return;
+        }
+        const app = initializeApp(firebaseConfig);
+        db = getFirestore(app);
+        auth = getAuth(app);
+        setLogLevel('debug');
+
+        onAuthStateChanged(auth, async (user) => {
+          if (user) {
+            userId = user.uid;
+            transactionsCol = collection(db, `artifacts/${appId}/users/${userId}/transactions`);
+            settingsDoc = doc(db, `artifacts/${appId}/users/${userId}/settings/app`);
+            await loadBaselineFromCloud();
+            setupTransactionListener();
+          } else {
+            await authenticateUser();
+          }
+        });
+      } catch (e) {
+        console.error('Init error:', e);
+        loadBaselineLocal();
+        showApp();
+      }
+    }
+
+    async function authenticateUser() {
+      try {
+        if (initialAuthToken) await signInWithCustomToken(auth, initialAuthToken);
+        else await signInAnonymously(auth);
+      } catch (e) {
+        console.error('Auth failed:', e);
+        loadBaselineLocal();
+        showApp();
+      }
+    }
+
+    function setupTransactionListener() {
+      if (!transactionsCol) return;
+      onSnapshot(transactionsCol, (snap) => {
+        transactions = [];
+        snap.forEach(d => transactions.push({ id: d.id, ...d.data() }));
+        updateDOM();
+        showApp();
+      }, (err) => {
+        console.error('Snapshot error:', err);
+        showApp();
+      });
+    }
+
+    async function loadBaselineFromCloud() {
+      try {
+        if (!settingsDoc) { loadBaselineLocal(); return; }
+        const s = await getDoc(settingsDoc);
+        if (s.exists()) {
+          const data = s.data();
+          baselineOffset = Number(data?.baselineOffset || 0);
+          const ts = data?.baselineTimestamp;
+          baselineTimestamp = ts ? toJsDate(ts) : null;
+        } else {
+          // nothing yet; keep local or zeros
+          loadBaselineLocal();
+        }
+      } catch (e) {
+        console.error('Load baseline failed:', e);
+        loadBaselineLocal();
+      }
+    }
+
+    async function saveBaselineToCloud() {
+      try {
+        if (settingsDoc) {
+          await setDoc(settingsDoc, {
+            baselineOffset,
+            baselineTimestamp: baselineTimestamp || new Date()
+          }, { merge: true });
+        }
+        saveBaselineLocal();
+      } catch (e) {
+        console.error('Save baseline failed:', e);
+        saveBaselineLocal();
+      }
+    }
+
+    /* ---------- Actions ---------- */
+    async function addTransaction(e) {
+      e.preventDefault();
+      const description = textInput.value.trim();
+      const amount = parseFloat(amountInput.value);
+      const type = document.querySelector('input[name="type"]:checked').value;
+      if (!description || !Number.isFinite(amount) || amount === 0) return;
+
+      const t = {
+        text: description,
+        amount: type === 'expense' ? -Math.abs(amount) : Math.abs(amount),
+        createdAt: new Date()
+      };
+
+      try {
+        if (transactionsCol) await addDoc(transactionsCol, t);
+        else { t.id = crypto.randomUUID(); transactions.push(t); updateDOM(); }
+        textInput.value=''; amountInput.value='';
+      } catch (e) { console.error('Add failed:', e); }
+    }
+
+    async function removeTransaction(id) {
+      try {
+        if (transactionsCol) {
+          await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/transactions`, id));
+        } else {
+          transactions = transactions.filter(t => t.id !== id);
+          updateDOM();
+        }
+      } catch (e) { console.error('Delete failed:', e); }
+    }
+
+    // Non-destructive zero: set baselineOffset so current displayed balance becomes 0
+    async function zeroNow() {
+      const realTotal = transactions.reduce((a,t)=>a + t.amount, 0);
+      baselineOffset = -realTotal;
+      baselineTimestamp = new Date();
+      await saveBaselineToCloud();
+      updateDOM();
+    }
+
+    async function undoZero() {
+      baselineOffset = 0;
+      baselineTimestamp = null;
+      await saveBaselineToCloud();
+      updateDOM();
+    }
+
+    // Destructive hard reset
+    async function hardReset() {
+      const ok = confirm('This deletes ALL transactions. This cannot be undone. Continue?');
+      if (!ok) return;
+      try {
+        if (transactionsCol) {
+          const snap = await getDocs(transactionsCol);
+          const ops = [];
+          snap.forEach(d => ops.push(deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/transactions`, d.id))));
+          await Promise.all(ops);
+        }
+        transactions = [];
+        // also clear baseline so you truly start fresh
+        baselineOffset = 0; baselineTimestamp = null; await saveBaselineToCloud();
+        updateDOM();
+      } catch (e) {
+        console.error('Hard reset failed:', e);
+        alert('Hard reset failed. See console for details.');
+      }
+    }
+
+    /* ---------- UI Update ---------- */
+    function updateDOM() {
+      // Sort by date for visuals
+      const sorted = [...transactions].sort((a,b)=> toJsDate(a.createdAt) - toJsDate(b.createdAt));
+
+      // History list
+      list.innerHTML = '';
+      if (sorted.length === 0) {
+        list.innerHTML = `<li class="text-center text-slate-500 py-4">No transactions yet.</li>`;
+      } else {
+        sorted.forEach(addTransactionDOM);
+      }
+
+      // Values with baseline offset applied to total, and recomputed I/E since baseline time
+      updateValuesWithBaseline(sorted);
+
+      // Graphs
+      renderGraphs(sorted);
+
+      // Baseline note
+      updateBaselineNote();
+    }
+
+    function addTransactionDOM(t) {
+      const sign = t.amount < 0 ? '-' : '+';
+      const type = t.amount < 0 ? 'expense' : 'income';
+      const li = document.createElement('li');
+      li.className = `transaction ${type} bg-slate-50 p-3 rounded-lg flex justify-between items-center shadow-sm relative group`;
+      li.innerHTML = `
+        <span class="font-medium text-slate-800">${t.text}</span>
+        <span class="font-semibold ${type === 'income' ? 'text-green-600' : 'text-red-600'}">${sign}£${Math.abs(t.amount).toFixed(2)}</span>
+        <button class="absolute left-0 -translate-x-full bg-red-500 text-white w-10 h-full flex items-center justify-center rounded-l-lg opacity-0 group-hover:opacity-100 transition-opacity"
+          onclick="window.removeTransaction('${t.id}')" title="Delete">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd"/>
+          </svg>
+        </button>
+      `;
+      list.appendChild(li);
+    }
+
+    // Displayed totals respect baselineOffset and (optionally) baselineTimestamp
+    function updateValuesWithBaseline(sorted) {
+      const realAmounts = sorted.map(t => t.amount);
+      const realTotal = realAmounts.reduce((a,b)=>a+b, 0);
+      const displayTotal = realTotal + baselineOffset;
+
+      // Income/Expense since baselineTimestamp (if set), else overall
+      const since = baselineTimestamp ? +baselineTimestamp : -Infinity;
+      const sinceAmounts = sorted.filter(t => +toJsDate(t.createdAt) >= since).map(t => t.amount);
+      const inc = sinceAmounts.filter(v => v > 0).reduce((a,b)=>a+b, 0);
+      const exp = Math.abs(sinceAmounts.filter(v => v < 0).reduce((a,b)=>a+b, 0));
+
+      balance.textContent = `£${displayTotal.toFixed(2)}`;
+      money_plus.textContent = `+£${inc.toFixed(2)}`;
+      money_minus.textContent = `-£${exp.toFixed(2)}`;
+    }
+
+    /* ---------- Charts ---------- */
+    function renderGraphs(sorted) {
+      if (graphsCard.classList.contains('hidden')) return;
+
+      // Balance over time with baselineOffset added to ALL points after baselineTimestamp
+      const pts = [];
+      let cum = 0;
+      const baseTs = baselineTimestamp ? +baselineTimestamp : -Infinity;
+
+      sorted.forEach(t => {
+        cum += t.amount;
+        const when = +toJsDate(t.createdAt);
+        const adj = when >= baseTs ? cum + baselineOffset : cum; // offset applies from baseline onwards
+        pts.push({ x: when, y: adj });
+      });
+
+      if (pts.length === 0) {
+        const now = Date.now();
+        pts.push({ x: now, y: baselineOffset }); // show flat zero start
+      }
+
+      drawLineChart(balanceCanvas, pts);
+
+      // Income vs Expense since baseline
+      const since = baseTs;
+      const sinceAmounts = sorted.filter(t => +toJsDate(t.createdAt) >= since).map(t => t.amount);
+      const inc = sinceAmounts.filter(v => v > 0).reduce((a,b)=>a+b, 0);
+      const exp = Math.abs(sinceAmounts.filter(v => v < 0).reduce((a,b)=>a+b, 0));
+      drawPieChart(pieCanvas, [inc, exp], ["Income", "Expense"]);
+    }
+
+    function drawLineChart(canvas, points) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+
+      const pad = 40, W = canvas.width, H = canvas.height;
+      const iw = W - pad*2, ih = H - pad*2;
+
+      const xs = points.map(p=>p.x);
+      const ys = points.map(p=>p.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(0, Math.min(...ys));
+      const maxY = Math.max(0, Math.max(...ys)) || 1;
+
+      const xScale = x => pad + iw * ((x - minX) / ((maxX - minX) || 1));
+      const yScale = y => H - pad - ih * ((y - minY) / ((maxY - minY) || 1));
+
+      // axes
+      ctx.strokeStyle = "#94a3b8"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(pad, H-pad); ctx.lineTo(W-pad, H-pad); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pad, pad); ctx.lineTo(pad, H-pad); ctx.stroke();
+
+      // zero line
+      const zeroY = yScale(0);
+      ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(pad, zeroY); ctx.lineTo(W-pad, zeroY); ctx.stroke(); ctx.setLineDash([]);
+
+      // line
+      ctx.strokeStyle = "#2563eb"; ctx.lineWidth = 2;
+      ctx.beginPath();
+      points.forEach((p,i)=>{ const x=xScale(p.x), y=yScale(p.y); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+      ctx.stroke();
+
+      // points
+      ctx.fillStyle = "#1d4ed8";
+      points.forEach(p=>{ const x=xScale(p.x), y=yScale(p.y); ctx.beginPath(); ctx.arc(x,y,3,0,Math.PI*2); ctx.fill(); });
+
+      // labels
+      ctx.fillStyle = "#475569"; ctx.font = "12px Inter, sans-serif";
+      [maxY, 0, minY].forEach(val => { const y = yScale(val); ctx.fillText(`£${val.toFixed(0)}`, 6, y+4); });
+    }
+
+    function drawPieChart(canvas, values, labels) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+
+      const total = values.reduce((a,b)=>a+b,0);
+      const cx = canvas.width/2, cy = canvas.height/2;
+      const r = Math.min(canvas.width, canvas.height)/2 - 20;
+      const colors = ["#16a34a","#dc2626","#f59e0b","#3b82f6","#9333ea"];
+
+      let start = -Math.PI/2;
+      values.forEach((v,i)=>{
+        const angle = total ? (v/total)*Math.PI*2 : 0;
+        ctx.beginPath();
+        ctx.moveTo(cx,cy);
+        ctx.arc(cx,cy,r,start,start+angle);
+        ctx.closePath();
+        ctx.fillStyle = colors[i%colors.length];
+        ctx.fill();
+        start += angle;
+      });
+
+      // legend
+      ctx.font = "12px Inter, sans-serif"; ctx.fillStyle = "#334155";
+      let ly = 18;
+      labels.forEach((lab,i)=>{
+        ctx.fillStyle = colors[i%colors.length]; ctx.fillRect(10, ly-10, 12, 12);
+        ctx.fillStyle = "#334155";
+        const pct = total ? ` (${Math.round(values[i]/total*100)}%)` : '';
+        ctx.fillText(`${lab}${pct}`, 28, ly);
+        ly += 18;
+      });
+
+      // center total text
+      ctx.fillStyle = "#0f172a"; ctx.font = "bold 14px Inter, sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(`Total £${total.toFixed(2)}`, cx, cy + r + 16);
+      ctx.textAlign = "start";
+    }
+
+    /* ---------- Events ---------- */
+    form.addEventListener('submit', addTransaction);
+    window.removeTransaction = removeTransaction;
+    toggleGraphsBtn.addEventListener('click', () => {
+      graphsCard.classList.toggle('hidden');
+      toggleGraphsBtn.textContent = graphsCard.classList.contains('hidden') ? 'Show Graphs' : 'Hide Graphs';
+    });
+    zeroBtn.addEventListener('click', zeroNow);
+    undoZeroBtn.addEventListener('click', undoZero);
+    hardResetBtn.addEventListener('click', hardReset);
+
+    /* ---------- Start ---------- */
+    initializeAppAndAuth();
+  </script>
+</body>
+</html>
